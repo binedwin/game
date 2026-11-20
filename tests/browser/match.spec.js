@@ -13,7 +13,7 @@ test("five independent sessions finish three rounds and return to the lobby", as
       contexts.push(ctx);
       const page = await ctx.newPage();
       page.on("pageerror", (error) => errors.push(error.message));
-      await page.goto("http://127.0.0.1:3115");
+      await page.goto(process.env.FALLING_FLOOR_TEST_URL);
       await expect(page.getByText("서버 온라인")).toBeVisible();
       pages.push(page);
     }
@@ -83,7 +83,7 @@ test("mobile practice renders the arena, accepts touch movement and resumes afte
     const p = await context.newPage();
     const errors = [];
     p.on("pageerror", (e) => errors.push(e.message));
-    await p.goto("http://127.0.0.1:3115");
+    await p.goto(process.env.FALLING_FLOOR_TEST_URL);
     await expect(p.getByText("서버 온라인")).toBeVisible();
     expect(
       await p.evaluate(
