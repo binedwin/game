@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 export const colors: Record<string, string[]> = {
+  orange: ["#ff984d", "#ffe1a0", "#d36a39"],
   coral: ["#ff625e", "#ffaca0", "#ce394d"],
   blue: ["#57aafa", "#b6e7ff", "#3974db"],
   mint: ["#41d5b1", "#afffe0", "#219c89"],
@@ -88,6 +89,11 @@ export function Avatar({
   );
 }
 const glyphs: Record<string, string[]> = {
+  E: ["11111", "11000", "11000", "11110", "11000", "11000", "11111"],
+  M: ["10001", "11011", "11111", "11011", "11011", "11011", "11011"],
+  P: ["11110", "11011", "11011", "11110", "11000", "11000", "11000"],
+  T: ["11111", "01110", "00100", "00100", "00100", "00100", "00100"],
+  Y: ["11011", "11011", "01010", "01110", "00100", "00100", "00100"],
   F: ["11111", "11000", "11000", "11110", "11000", "11000", "11000"],
   A: ["01110", "11011", "11011", "11111", "11011", "11011", "11011"],
   L: ["11000", "11000", "11000", "11000", "11000", "11000", "11111"],
@@ -119,11 +125,11 @@ export function TitleArt() {
       c.fillStyle = color;
       for (const [a, b] of blocks) c.fillRect(a, b, 6, 6);
     };
-    draw("FALLING", 5, "#fffaf0");
-    draw("FLOOR", 60, "#ffdf59");
+    draw("GAME", 5, "#fffaf0");
+    draw("PARTY", 60, "#ffdf59");
   }, []);
   return (
-    <h1 aria-label="Falling Floor">
+    <h1 aria-label="미니게임 천국 · Game Party">
       <canvas ref={ref} width="245" height="111" aria-hidden="true" />
     </h1>
   );

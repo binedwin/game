@@ -1,14 +1,17 @@
 import { test, expect } from "@playwright/test";
-test("five independent sessions finish three rounds and return to the lobby", async ({
+test("six independent sessions finish three rounds and return to the lobby", async ({
   browser,
 }, testInfo) => {
   const contexts = [],
     pages = [],
     errors = [];
   try {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const ctx = await browser.newContext({
-        viewport: { width: 1280, height: 900 },
+        viewport:
+          i === 5 ? { width: 390, height: 844 } : { width: 1280, height: 900 },
+        hasTouch: i === 5,
+        isMobile: i === 5,
       });
       contexts.push(ctx);
       const page = await ctx.newPage();
@@ -28,13 +31,26 @@ test("five independent sessions finish three rounds and return to the lobby", as
     await host.getByLabel("라운드", { exact: true }).selectOption("3");
     for (const [i, p] of guests.entries()) {
       await p.getByLabel("닉네임").fill("친구" + i);
+      await p
+        .getByRole("button", {
+          name: ["블루", "민트", "골드", "퍼플", "오렌지"][i] + " 캐릭터",
+        })
+        .click();
       await p.getByRole("button", { name: "코드로 입장" }).click();
       await p.getByRole("textbox", { name: "방 코드" }).fill(code);
       await p.getByRole("button", { name: "방 입장", exact: true }).click();
-      await p.getByRole("button", { name: "준비 완료" }).click();
     }
+    await host.getByRole("button", { name: /PUSH OUT.*밀어내기/ }).click();
+    await expect(guests[0].getByText("선택한 모드 · 밀어내기")).toBeVisible();
+    await host.getByRole("button", { name: "두 게임 번갈아 진행" }).click();
+    for (const p of pages)
+      await p.getByRole("button", { name: "준비 완료" }).click();
     await host.getByRole("button", { name: "게임 시작" }).click();
     for (let round = 1; round <= 3; round++) {
+      await expect(host.locator(".round-intro")).toContainText(
+        round === 2 ? "밀어내기" : "바닥이 사라진다",
+        { timeout: 9000 },
+      );
       await Promise.all(
         pages.map((p) =>
           expect(p.locator(".hud")).toContainText("ROUND " + round + "/3"),
@@ -43,24 +59,34 @@ test("five independent sessions finish three rounds and return to the lobby", as
       await Promise.all(
         pages.map((p) => expect(p.locator(".board canvas")).toBeVisible()),
       );
+      if (round === 2) {
+        await host.locator(".countdown").waitFor({ state: "hidden" });
+        await host.screenshot({ path: testInfo.outputPath("push-out.png") });
+        await Promise.all(
+          pages.slice(1).map((p) => p.keyboard.down("ArrowDown")),
+        );
+      }
       if (round === 1)
         await host.screenshot({ path: testInfo.outputPath("arena.png") });
       await Promise.all(
         pages.map((p) =>
           expect(
             p.getByRole("heading", {
-              name: round === 3 ? "최종 순위" : "라운드 결과",
+              name: "라운드 결과",
             }),
           ).toBeVisible({ timeout: 10000 }),
         ),
       );
-      if (round < 3)
-        await host
-          .getByRole("button", { name: "다음 라운드", exact: true })
-          .click();
+      if (round === 2)
+        await Promise.all(
+          pages.slice(1).map((p) => p.keyboard.up("ArrowDown")),
+        );
     }
-    await expect(host.locator("tbody tr")).toHaveCount(5);
-    await host.getByRole("button", { name: "대기실로" }).click();
+    await expect(host.getByRole("heading", { name: "최종 순위" })).toBeVisible({
+      timeout: 8000,
+    });
+    await expect(host.locator("tbody tr")).toHaveCount(6);
+    await host.getByRole("button", { name: /대기실로/ }).click();
     await Promise.all(
       pages.map((p) =>
         expect(p.getByRole("heading", { name: "대기실" })).toBeVisible(),
@@ -112,5 +138,53 @@ test("mobile practice renders the arena, accepts touch movement and resumes afte
     expect(errors).toEqual([]);
   } finally {
     await context.close();
+  }
+});
+
+test("two players choose Push Out in the room, guard on mobile and cancel after a forfeit", async ({
+  browser,
+}) => {
+  const desktop = await browser.newContext(),
+    mobile = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+      isMobile: true,
+    });
+  try {
+    const host = await desktop.newPage(),
+      guest = await mobile.newPage();
+    for (const page of [host, guest]) {
+      await page.goto(process.env.FALLING_FLOOR_TEST_URL);
+      await expect(page.getByText("서버 온라인")).toBeVisible();
+    }
+    await host.getByRole("button", { name: "새로운 방 만들기" }).click();
+    const code = await host.locator(".invite b").innerText();
+    await guest.getByLabel("닉네임").fill("두번째");
+    await guest.getByRole("button", { name: "오렌지 캐릭터" }).tap();
+    await guest.getByRole("button", { name: "코드로 입장" }).tap();
+    await guest.getByLabel("방 코드").fill(code);
+    await guest.getByRole("button", { name: "방 입장", exact: true }).tap();
+    await guest.getByRole("button", { name: "준비 완료" }).tap();
+    await host.getByRole("button", { name: /PUSH OUT.*밀어내기/ }).click();
+    await expect(
+      guest.getByRole("button", { name: "준비 완료" }),
+    ).toBeVisible();
+    await expect(
+      guest.getByRole("button", { name: /PUSH OUT.*밀어내기/ }),
+    ).toBeDisabled();
+    await guest.getByRole("button", { name: "준비 완료" }).tap();
+    await host.getByRole("button", { name: "준비 완료" }).click();
+    await host.getByRole("button", { name: "게임 시작" }).click();
+    await expect(guest.locator(".round-intro")).toContainText("밀어내기");
+    const guard = guest.getByRole("button", { name: /방어/ });
+    await expect(guard).toBeEnabled({ timeout: 10000 });
+    await guard.tap();
+    await expect(guard).toBeDisabled();
+    await guest.getByRole("button", { name: "나가기", exact: true }).tap();
+    await guest.locator("dialog").getByRole("button", { name: "나가기" }).tap();
+    await expect(host.getByRole("heading", { name: "대기실" })).toBeVisible();
+    await expect(host.getByRole("alert")).toContainText("참가자");
+  } finally {
+    await Promise.all([desktop.close(), mobile.close()]);
   }
 });

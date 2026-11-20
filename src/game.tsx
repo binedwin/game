@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import type { Command, Room } from "./types";
-import { itemNames } from "./types";
+import { drawRing } from "./ring";
 import { paintSprite } from "./art";
 export function Arena({
   room,
@@ -24,7 +24,7 @@ export function Arena({
       if (disposed || !host.current) return;
       class Board extends P.Scene {
         board!: Phaser.GameObjects.Graphics;
-        actors!: Phaser.GameObjects.Group;
+
         sprites = new Map<
           string,
           { sprite: Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }
@@ -37,14 +37,23 @@ export function Arena({
             tex.refresh();
             const sprite = this.add.image(0, 0, p.color).setOrigin(0.5, 0.75);
             const label = this.add
-              .text(0, 0, p.id === id ? "▼ 나" : p.name, {
-                fontFamily: "sans-serif",
-                fontSize: "14px",
-                fontStyle: "bold",
-                color: "#ffffff",
-                stroke: "#282338",
-                strokeThickness: 4,
-              })
+              .text(
+                0,
+                0,
+                (p.id === id ? "▼ " : "") +
+                  "P" +
+                  (latest.current.players.indexOf(p) + 1) +
+                  " " +
+                  p.name,
+                {
+                  fontFamily: "sans-serif",
+                  fontSize: "14px",
+                  fontStyle: "bold",
+                  color: "#ffffff",
+                  stroke: "#282338",
+                  strokeThickness: 4,
+                },
+              )
               .setOrigin(0.5, 1);
             this.sprites.set(p.id, { sprite, label });
           }
@@ -57,13 +66,13 @@ export function Arena({
           g.clear();
           g.fillStyle(0x272639);
           g.fillRect(0, 0, 714, 714);
+          const ring = r.game === "push-out";
+          if (ring) drawRing(g, r, w);
           r.tiles.forEach((v, i) => {
             const x = (i % n) * w,
               y = Math.floor(i / n) * w;
             if (v === -1) return;
-            const danger =
-                v > 0 &&
-                v - r.now < (r.durations?.[i] ?? r.settings.collapseMs) * 0.4,
+            const danger = v > 0 && v - r.now < r.settings.collapseMs * 0.4,
               shrink =
                 r.ringWarning > 0 &&
                 Math.min(
@@ -72,7 +81,7 @@ export function Arena({
                   n - 1 - (i % n),
                   n - 1 - Math.floor(i / n),
                 ) === r.ring;
-            const warn = danger || shrink || r.fuses[i];
+            const warn = danger || shrink;
             const color = warn
               ? Math.floor(time / 120) % 2
                 ? 0xff8e84
@@ -95,41 +104,6 @@ export function Arena({
               g.lineTo(x + w * 0.68, y + w * 0.77);
               g.strokePath();
             }
-            if (r.specials[i]) {
-              const hue: Record<string, number> = {
-                speed: 0x359966,
-                bomb: 0xe5685c,
-                ice: 0x38accc,
-                armor: 0x6d74b4,
-                warp: 0x9367bf,
-                repair: 0x4c9b93,
-              };
-              g.fillStyle(hue[r.specials[i]]);
-              g.fillTriangle(
-                x + w * 0.5,
-                y + w * 0.22,
-                x + w * 0.72,
-                y + w * 0.51,
-                x + w * 0.28,
-                y + w * 0.51,
-              );
-              g.fillTriangle(
-                x + w * 0.5,
-                y + w * 0.74,
-                x + w * 0.72,
-                y + w * 0.51,
-                x + w * 0.28,
-                y + w * 0.51,
-              );
-            }
-            if (r.loot[i]) {
-              g.fillStyle(0x51304f);
-              g.fillRect(x + w * 0.25, y + w * 0.23, w * 0.5, w * 0.48);
-              g.fillStyle(0xfecc41);
-              g.fillRect(x + w * 0.29, y + w * 0.27, w * 0.42, w * 0.4);
-              g.fillStyle(0xfff5a0);
-              g.fillRect(x + w * 0.46, y + w * 0.25, w * 0.08, w * 0.43);
-            }
           });
           for (const p of r.players) {
             const a = this.sprites.get(p.id);
@@ -145,8 +119,8 @@ export function Arena({
                     w *
                     0.6
                   : 0;
-            const targetX = p.x * w,
-              targetY = p.y * w - jump,
+            const targetX = (ring ? 357 : 0) + p.x * w,
+              targetY = (ring ? 357 : 0) + p.y * w - jump,
               frac = a.sprite.x === 0 ? 1 : Math.min(1, delta / 60);
             a.sprite
               .setPosition(
@@ -156,17 +130,47 @@ export function Arena({
               .setDisplaySize(w * 1.02 * fraction, w * 0.94 * fraction)
               .setFlipX(p.fx < -0.1)
               .setVisible(visible)
-              .setAlpha(p.ghost > r.now ? 0.6 : 1);
-            if (
-              p.shield ||
-              p.frozen > r.now ||
-              r.effects.some((e) => e.target === p.id)
-            ) {
-              g.lineStyle(
-                3,
-                p.shield ? 0xffdd55 : p.frozen > r.now ? 0xe9ffff : 0xdc3356,
+              .setAlpha(1);
+            if (ring && p.alive) {
+              if (p.dashUntil > r.now) {
+                g.lineStyle(7, 0xffed9e, 0.8);
+                g.lineBetween(
+                  targetX,
+                  targetY,
+                  targetX - p.fx * w * 0.9,
+                  targetY - p.fy * w * 0.9,
+                );
+              }
+              if (p.guardUntil > r.now) {
+                g.fillStyle(0x8df1ff, 0.26);
+                g.fillCircle(targetX, targetY, w * 0.65);
+                g.lineStyle(3, 0xb7faff);
+                g.strokeCircle(targetX, targetY, w * 0.65);
+              }
+              const age = r.now - p.lastPush;
+              if (p.lastPush && age < 260) {
+                g.lineStyle(
+                  4,
+                  p.lastHit === p.lastPush ? 0xffdc52 : 0xfff5d4,
+                  1 - age / 260,
+                );
+                g.beginPath();
+                const angle = Math.atan2(p.fy, p.fx);
+                g.arc(
+                  targetX,
+                  targetY,
+                  w * (0.55 + age / 260),
+                  angle - 0.96,
+                  angle + 0.96,
+                );
+                g.strokePath();
+              }
+              g.fillStyle(0xffffff);
+              g.fillCircle(
+                targetX + p.fx * w * 0.43,
+                targetY + p.fy * w * 0.43,
+                2.6,
               );
-              g.strokeCircle(targetX, targetY, w * 0.6);
             }
             a.label
               .setVisible(p.alive)
@@ -212,7 +216,7 @@ export function Arena({
     };
     const key = (e: KeyboardEvent, down: boolean) => {
       if (
-        document.querySelector("dialog[open]") ||
+        (down && document.querySelector("dialog[open]")) ||
         !(
           e.code.startsWith("Arrow") ||
           [
@@ -233,9 +237,11 @@ export function Arena({
       else keys.delete(e.code);
       send();
       if (down && !e.repeat) {
-        if (e.code === "Space") command("jump");
+        if (e.code === "Space")
+          command(latest.current.game === "push-out" ? "push" : "jump");
         if (e.code.startsWith("Shift")) command("dash");
-        if (e.code === "KeyE") command("item");
+        if (e.code === "KeyE" && latest.current.game === "push-out")
+          command("guard");
       }
     };
     const d = (e: KeyboardEvent) => key(e, true),
@@ -245,12 +251,17 @@ export function Arena({
         dir.current = [0, 0];
         send(true);
       };
+    const hidden = () => {
+      if (document.hidden) clear();
+    };
+    document.addEventListener("visibilitychange", hidden);
     window.addEventListener("keydown", d);
     window.addEventListener("keyup", u);
     window.addEventListener("blur", clear);
-    const timer = setInterval(() => send(true), 200);
+    const timer = setInterval(() => send(true), 100);
     return () => {
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", hidden);
       window.removeEventListener("keydown", d);
       window.removeEventListener("keyup", u);
       window.removeEventListener("blur", clear);
@@ -269,7 +280,6 @@ export function Arena({
     dir.current = [x / l, y / l];
     knob.current!.style.transform =
       "translate(" + (x / l) * 22 + "px," + (y / l) * 22 + "px)";
-    command("move", { x: x / l, y: y / l });
   };
   const reset = () => {
     dir.current = [0, 0];
@@ -297,7 +307,12 @@ export function Arena({
         )}
       </div>
       {room.phase === "playing" && !p.alive && (
-        <p className="spectate">관전 중 · 남은 플레이어의 경기를 지켜보세요.</p>
+        <div className="spectate">
+          관전 중 · 누적 점수{" "}
+          <p>
+            {room.players.map((q) => q.name + " " + q.score + "점").join(" / ")}
+          </p>
+        </div>
       )}
       <div className="controls">
         <div
@@ -313,30 +328,37 @@ export function Arena({
         >
           <span ref={knob} />
         </div>
-        {room.settings.mobility && (
-          <>
-            <button
-              disabled={!p.alive || p.jumpReady > room.now}
-              onClick={() => command("jump")}
-            >
-              <kbd>SPACE</kbd> 점프 <small>{cd(p.jumpReady)}</small>
-            </button>
-            <button
-              disabled={!p.alive || p.dashReady > room.now}
-              onClick={() => command("dash")}
-            >
-              <kbd>SHIFT</kbd> 대시 <small>{cd(p.dashReady)}</small>
-            </button>
-          </>
-        )}
-        {room.settings.items && (
+        {(
+          (room.game === "push-out"
+            ? [
+                ["push", "SPACE", "밀치기", p.pushReady],
+                ["dash", "SHIFT", "대시", p.dashReady],
+                ...(room.settings.defense
+                  ? [["guard", "E", "방어", p.guardReady]]
+                  : []),
+              ]
+            : room.settings.mobility
+              ? [
+                  ["jump", "SPACE", "점프", p.jumpReady],
+                  ["dash", "SHIFT", "대시", p.dashReady],
+                ]
+              : []) as [string, string, string, number][]
+        ).map(([type, key, name, ready]) => (
           <button
-            disabled={!p.item || !p.alive}
-            onClick={() => command("item")}
+            key={type}
+            disabled={
+              room.phase !== "playing" ||
+              !p.alive ||
+              ready > room.now ||
+              p.jumpUntil > room.now ||
+              p.guardUntil > room.now ||
+              p.dashUntil > room.now
+            }
+            onClick={() => command(type)}
           >
-            <kbd>E</kbd> {itemNames[p.item ?? ""] || "아이템 없음"}
+            <kbd>{key}</kbd> {name} <small>{cd(ready)}</small>
           </button>
-        )}
+        ))}
       </div>
     </>
   );
