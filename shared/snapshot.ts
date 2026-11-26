@@ -34,6 +34,8 @@ export type Result = {
   total: number;
 };
 export type Room = {
+  liar?: import("./liar").LiarPublic;
+  liarResult?: import("./liar").LiarResult;
   code: string;
   host: string;
   phase: string;
@@ -59,6 +61,7 @@ export type Room = {
     matchId: string;
     round: number;
     game: GameId;
+    liarResult?: import("./liar").LiarResult;
     results: Result[];
   }[];
 };

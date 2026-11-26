@@ -2,9 +2,10 @@ import type { Actor, MatchRoom } from "./games/state";
 import type { GameId, Settings } from "../shared/party";
 import type { Result } from "../shared/snapshot";
 import { randomUUID } from "node:crypto";
-import { defaults, gameIds } from "../shared/party.ts";
+import { defaults, gameIds, eligibleGames } from "../shared/party.ts";
 import * as floor from "./games/falling-floor.ts";
 import * as push from "./games/push-out.ts";
+import { clearLiar, initLiar, currentLiar } from "./games/liar/round.ts";
 const modules = { "falling-floor": floor, "push-out": push };
 export const COLORS = ["coral", "blue", "mint", "gold", "purple", "orange"];
 export function configure(r: MatchRoom, changes: Partial<Settings>) {
@@ -24,7 +25,16 @@ export function configure(r: MatchRoom, changes: Partial<Settings>) {
     defense: [true, false],
   };
   for (const [key, value] of Object.entries(changes)) {
-    if (key === "collapseMs") {
+    if (key === "enabledGames") {
+      if (
+        !Array.isArray(value) ||
+        !value.length ||
+        value.length > gameIds.length ||
+        value.some((id) => !gameIds.includes(id)) ||
+        new Set(value).size !== value.length
+      )
+        return false;
+    } else if (key === "collapseMs") {
       if (
         typeof value !== "number" ||
         !Number.isInteger(value) ||
@@ -37,6 +47,12 @@ export function configure(r: MatchRoom, changes: Partial<Settings>) {
       return false;
   }
   if (changes.maxPlayers !== undefined && changes.maxPlayers < r.players.length)
+    return false;
+  const next = { ...r.settings, ...changes };
+  if (
+    next.mode === "single" &&
+    !eligibleGames(next, r.players.length).includes(next.singleGame)
+  )
     return false;
   Object.assign(r.settings, changes);
   resetReady(r);
@@ -115,17 +131,24 @@ export function room(code: string, host: Actor): MatchRoom {
     nextRadius: null,
   };
 }
-export function schedule(s: Settings): GameId[] {
+export function schedule(s: Settings, count = 6): GameId[] {
+  const eligible = eligibleGames(s, count);
+  if (
+    !eligible.length ||
+    (s.mode === "single" && !eligible.includes(s.singleGame))
+  )
+    return [];
   if (s.mode === "single") return Array(s.rounds).fill(s.singleGame);
   const order: GameId[] = [];
   while (order.length < s.rounds) {
-    const bag = [...gameIds];
+    const bag = [...eligible];
     if (s.mode === "random") {
       for (let i = bag.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [bag[i], bag[j]] = [bag[j], bag[i]];
       }
-      if (bag[0] === order.at(-1)) [bag[0], bag[1]] = [bag[1], bag[0]];
+      if (bag.length > 1 && bag[0] === order.at(-1))
+        [bag[0], bag[1]] = [bag[1], bag[0]];
     }
     order.push(...bag);
   }
@@ -138,8 +161,10 @@ export function startMatch(r: MatchRoom, now: number) {
     r.players.some((p) => !p.connected || !p.ready)
   )
     return false;
+  const sequence = schedule(r.settings, r.players.length);
+  if (!sequence.length) return false;
   r.matchId = randomUUID();
-  r.schedule = schedule(r.settings);
+  r.schedule = sequence;
   r.round = 0;
   r.history = [];
   for (const p of r.players)
@@ -148,6 +173,7 @@ export function startMatch(r: MatchRoom, now: number) {
   return true;
 }
 export function beginRound(r: MatchRoom, now: number) {
+  clearLiar(r);
   r.round++;
   r.game = r.schedule[r.round - 1];
   r.phase = "intro";
@@ -187,6 +213,33 @@ export function beginRound(r: MatchRoom, now: number) {
       actionSeq: -1,
     });
   }
+  if (r.game === "liar-game") {
+    const participants = r.players.filter((p) => !p.forfeited).length;
+    if (participants >= 3) {
+      r.tiles = [];
+      initLiar(r);
+      return;
+    }
+    const replacement = eligibleGames(r.settings, participants).find(
+      (id) => id !== "liar-game",
+    );
+    if (replacement) r.schedule[r.round - 1] = r.game = replacement;
+    else {
+      r.phase = "playing";
+      r.liarResult = {
+        outcome: "VOID",
+        answer: null,
+        category: "",
+        liarId: null,
+        nominated: null,
+        clues: [],
+        ballots: [],
+        guess: null,
+      };
+      settle(r, now, []);
+      return;
+    }
+  }
   modules[r.game].init(r);
 }
 export function move(
@@ -198,6 +251,7 @@ export function move(
 ) {
   if (
     r.phase !== "playing" ||
+    r.game === "liar-game" ||
     !p.alive ||
     !p.connected ||
     ![x, y].every((v) => Number.isFinite(v) && Math.abs(v) <= 1)
@@ -214,10 +268,10 @@ export function move(
   }
 }
 export function action(r: MatchRoom, p: Actor, type: string, now: number) {
-  if (r.phase === "playing" && p.alive && p.connected)
+  if (r.game !== "liar-game" && r.phase === "playing" && p.alive && p.connected)
     modules[r.game].action(r, p, type, now);
 }
-export function settle(r: MatchRoom, now: number) {
+export function settle(r: MatchRoom, now: number, teams?: string[][]) {
   if (
     r.phase !== "playing" ||
     r.history.some((h) => h.matchId === r.matchId && h.round === r.round)
@@ -228,11 +282,22 @@ export function settle(r: MatchRoom, now: number) {
     .sort((a, b) => (b.dead ?? Infinity) - (a.dead ?? Infinity));
   const rows: Result[] = [];
   const n = r.players.length;
-  for (let i = 0; i < sorted.length; ) {
-    let end = i + 1;
-    while (end < sorted.length && sorted[end].dead === sorted[i].dead) end++;
-    const points = n - (i + end - 1) / 2;
-    for (const p of sorted.slice(i, end)) {
+  const groups: Actor[][] = [];
+  if (teams) {
+    for (const ids of teams)
+      groups.push(sorted.filter((p) => ids.includes(p.id)));
+  } else
+    for (const p of sorted) {
+      const last = groups.at(-1);
+      if (last && last[0].dead === p.dead) last.push(p);
+      else groups.push([p]);
+    }
+  let i = 0;
+  for (const group of groups) {
+    if (!group.length) continue;
+    const end = i + group.length,
+      points = n - (i + end - 1) / 2;
+    for (const p of group) {
       p.score += points;
       if (i === 0) p.wins++;
       rows.push({
@@ -245,7 +310,9 @@ export function settle(r: MatchRoom, now: number) {
     }
     i = end;
   }
-  for (const p of r.players.filter((p) => p.forfeited))
+  for (const p of r.players.filter(
+    (p) => p.forfeited || (teams && !rows.some((row) => row.id === p.id)),
+  ))
     rows.push({
       id: p.id,
       rank: null,
@@ -259,6 +326,7 @@ export function settle(r: MatchRoom, now: number) {
     round: r.round,
     game: r.game,
     results: rows,
+    ...(r.liarResult ? { liarResult: r.liarResult } : {}),
   });
   r.phase = "result";
   r.nextRound = now + 5000;
@@ -273,6 +341,12 @@ export function tick(r: MatchRoom, now: number, dt: number) {
   if (r.phase === "intro" && now >= r.start - 3000) r.phase = "countdown";
   if (r.phase === "countdown" && now >= r.start) r.phase = "playing";
   if (r.phase !== "playing") return;
+  if (r.game === "liar-game") {
+    const game = currentLiar(r)!;
+    game.advance(now);
+    if (game.outcome) settle(r, now, game.groups());
+    return;
+  }
   for (const p of r.players)
     if (now - p.inputAt >= 250) {
       p.dx = 0;

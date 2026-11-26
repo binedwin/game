@@ -5,7 +5,9 @@ import { Avatar, colors, HeroArt, TitleArt, TileArt } from "./art";
 import { Icon } from "./icons";
 import { Arena } from "./game";
 import type { Command, Room, Settings } from "./types";
-import { games, gameIds, type GameId } from "../shared/party";
+import { LiarGame, Reveal } from "./LiarGame";
+import type { LiarPrivate } from "../shared/liar";
+import { games, gameIds, eligibleGames, type GameId } from "../shared/party";
 import "./style.css";
 
 const socket = io(import.meta.env.VITE_GAME_SERVER_URL || undefined, {
@@ -68,7 +70,11 @@ function GameArt({ game }: { game: GameId }) {
         </>
       ) : (
         <>
-          <span className="mini-ring" />
+          {game === "liar-game" ? (
+            <span className="mystery-card">?</span>
+          ) : (
+            <span className="mini-ring" />
+          )}
           <Avatar color="orange" size={42} />
           <Avatar color="purple" size={40} />
         </>
@@ -104,6 +110,7 @@ function Guide({ practice }: { practice: (id: GameId) => void }) {
   );
 }
 function GamePicker({ r, owner }: { r: Room; owner: boolean }) {
+  const eligible = eligibleGames(r.settings, r.players.length);
   const select = (mode: string, singleGame?: GameId) =>
     command("settings", {
       value: singleGame ? { mode, singleGame } : { mode },
@@ -115,7 +122,7 @@ function GamePicker({ r, owner }: { r: Room; owner: boolean }) {
         {gameIds.map((id) => (
           <button
             key={id}
-            disabled={!owner}
+            disabled={!owner || !eligible.includes(id)}
             aria-pressed={
               r.settings.mode === "single" && r.settings.singleGame === id
             }
@@ -126,11 +133,45 @@ function GamePicker({ r, owner }: { r: Room; owner: boolean }) {
             <span>
               <small>{games[id].english}</small>
               <strong>{games[id].name}</strong>
-              <span>이 게임만 진행</span>
+              <span>
+                {id === "liar-game" ? "3~6명 · 추리" : "이 게임만 진행"}
+              </span>
             </span>
           </button>
         ))}
       </div>
+      <fieldset className="mix-set">
+        <legend>진행할 게임</legend>
+        {gameIds.map((id) => (
+          <label key={id}>
+            <input
+              type="checkbox"
+              aria-label={games[id].name + " 포함"}
+              disabled={
+                !owner ||
+                (r.settings.enabledGames.length === 1 &&
+                  r.settings.enabledGames.includes(id))
+              }
+              checked={r.settings.enabledGames.includes(id)}
+              onChange={(e) => {
+                const enabledGames = e.target.checked
+                  ? [...r.settings.enabledGames, id]
+                  : r.settings.enabledGames.filter((g) => g !== id);
+                command("settings", {
+                  value: {
+                    enabledGames,
+                    ...(r.settings.mode === "single" &&
+                    !enabledGames.includes(r.settings.singleGame)
+                      ? { mode: "random" }
+                      : {}),
+                  },
+                });
+              }}
+            />
+            {games[id].name}
+          </label>
+        ))}
+      </fieldset>
       <div className="mix-options">
         {(["random", "alternate"] as const).map((mode, i) => (
           <button
@@ -139,7 +180,7 @@ function GamePicker({ r, owner }: { r: Room; owner: boolean }) {
             key={mode}
             onClick={() => select(mode)}
           >
-            {i ? "두 게임 번갈아 진행" : "두 게임 랜덤 진행"}
+            {i ? "번갈아 진행" : "랜덤 진행"}
           </button>
         ))}
       </div>
@@ -148,7 +189,7 @@ function GamePicker({ r, owner }: { r: Room; owner: boolean }) {
         {r.settings.mode === "single"
           ? games[r.settings.singleGame].name
           : r.settings.mode === "alternate"
-            ? "바닥이 사라진다 → 밀어내기"
+            ? eligible.map((id) => games[id].name).join(" → ")
             : "랜덤"}
       </p>
     </section>
@@ -269,6 +310,7 @@ function SettingsPanel({ r, owner }: { r: Room; owner: boolean }) {
   );
 }
 function App() {
+  const [secret, setSecret] = useState<LiarPrivate | null>(null);
   const [r, setRoom] = useState<Room | null>(null),
     [id, setId] = useState(""),
     [online, setOnline] = useState(false),
@@ -302,6 +344,7 @@ function App() {
     const left = () => {
       sessionStorage.removeItem("ff-session");
       current = null;
+      setSecret(null);
       setRoom(null);
       setId("");
       setBusy(false);
@@ -313,6 +356,22 @@ function App() {
         setOnline(false);
         setBusy(false);
       })
+      .on("liar:private", (v: LiarPrivate) => {
+        if (
+          current?.game === "liar-game" &&
+          current.phase === "playing" &&
+          current.matchId === v.matchId &&
+          current.round === v.round &&
+          current.liar?.version === v.version
+        )
+          setSecret((prev) =>
+            prev?.matchId === v.matchId &&
+            prev.round === v.round &&
+            prev.revision > v.revision
+              ? prev
+              : v,
+          );
+      })
       .on("state", (v: Room) => {
         if (
           current?.matchId &&
@@ -321,6 +380,21 @@ function App() {
             (v.round === current.round && v.now < current.now))
         )
           return;
+        if (
+          current?.matchId === v.matchId &&
+          current?.round === v.round &&
+          current.liar &&
+          v.liar &&
+          v.liar.revision < current.liar.revision
+        )
+          return;
+        if (
+          v.phase !== "playing" ||
+          v.game !== "liar-game" ||
+          current?.round !== v.round ||
+          current?.matchId !== v.matchId
+        )
+          setSecret(null);
         current = v;
         setRoom(v);
       })
@@ -655,6 +729,12 @@ function App() {
                         className="primary"
                         disabled={
                           r.players.length < 2 ||
+                          !eligibleGames(r.settings, r.players.length).length ||
+                          (r.settings.mode === "single" &&
+                            !eligibleGames(
+                              r.settings,
+                              r.players.length,
+                            ).includes(r.settings.singleGame)) ||
                           r.players.some((p) => !p.connected || !p.ready)
                         }
                         onClick={() => command("start")}
@@ -675,9 +755,13 @@ function App() {
                 <h2>{games[r.game].name}</h2>
                 <GameArt game={r.game} />
                 <p>{games[r.game].rule}</p>
-                <b>마지막까지 살아남으면 승리!</b>
+                <b>
+                  {r.game === "liar-game"
+                    ? "시민은 라이어를 찾고, 라이어는 제시어를 추리하세요."
+                    : "마지막까지 살아남으면 승리!"}
+                </b>
                 <p>
-                  WASD / 방향키 이동 ·{" "}
+                  {r.game !== "liar-game" && "WASD / 방향키 이동 · "}
                   {r.game === "falling-floor" && !r.settings.mobility
                     ? "이동만 사용"
                     : r.game === "push-out" && !r.settings.defense
@@ -690,7 +774,27 @@ function App() {
                 </small>
               </section>
             )}
-            {active && (
+            {active &&
+              r.game === "liar-game" &&
+              (r.phase === "playing" && r.liar ? (
+                <LiarGame
+                  key={r.matchId + ":" + r.round}
+                  room={r}
+                  id={id}
+                  own={secret}
+                  socket={socket}
+                />
+              ) : (
+                <section className="panel round-intro">
+                  <small>ROUND {r.round}</small>
+                  <h2>라이어 게임</h2>
+                  <p>
+                    역할 카드 배부까지{" "}
+                    {Math.max(1, Math.ceil((r.start - r.now) / 1000))}초
+                  </p>
+                </section>
+              ))}
+            {active && r.game !== "liar-game" && (
               <section className="play-area">
                 <div className="hud">
                   <b>
@@ -754,16 +858,27 @@ function App() {
                             (a) => r.players.find((p) => p.id === a.id)?.name,
                           )
                     ).join(" · ")}{" "}
-                    우승!
+                    {!final && r.liarResult?.outcome === "VOID"
+                      ? "라운드 무효"
+                      : "우승!"}
                   </strong>
                 </div>
+                {r.liarResult && !final && (
+                  <Reveal room={r} result={r.liarResult} />
+                )}
                 <div className="score-table">
                   <table>
                     <thead>
                       <tr>
                         <th>순위</th>
                         <th>플레이어</th>
-                        <th>{final ? "1위 횟수" : "생존 시간"}</th>
+                        <th>
+                          {final
+                            ? "1위 횟수"
+                            : r.game === "liar-game"
+                              ? "역할"
+                              : "생존 시간"}
+                        </th>
                         <th>{final ? "마지막 판" : "획득 점수"}</th>
                         <th>누적 점수</th>
                       </tr>
@@ -795,7 +910,21 @@ function App() {
                                 {p.name}
                               </span>
                             </td>
-                            <td>{final ? p.wins : <Time ms={a.time} />}</td>
+                            <td>
+                              {final ? (
+                                p.wins
+                              ) : r.game === "liar-game" ? (
+                                r.liarResult?.liarId === p.id ? (
+                                  "라이어"
+                                ) : r.liarResult?.liarId ? (
+                                  "시민"
+                                ) : (
+                                  "—"
+                                )
+                              ) : (
+                                <Time ms={a.time} />
+                              )}
+                            </td>
                             <td>+{a.points}</td>
                             <td>
                               <b>{p.score}</b>
@@ -814,11 +943,18 @@ function App() {
                         <h3>
                           {h.round}라운드 · {games[h.game].name}
                         </h3>
+                        {h.liarResult && (
+                          <Reveal result={h.liarResult} room={r} />
+                        )}
                         {h.results.map((row) => (
                           <p key={row.id}>
                             {r.players.find((p) => p.id === row.id)?.name} ·{" "}
-                            {row.rank ? row.rank + "위" : "중도 이탈"} · +
-                            {row.points}점
+                            {row.rank
+                              ? row.rank + "위"
+                              : h.liarResult?.outcome === "VOID"
+                                ? "무효"
+                                : "중도 이탈"}{" "}
+                            · +{row.points}점
                           </p>
                         ))}
                       </section>

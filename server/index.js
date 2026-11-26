@@ -16,6 +16,8 @@ import {
   tick,
 } from "./game.ts";
 
+import { currentLiar, clearLiar } from "./games/liar/round.ts";
+import { gameIds } from "../shared/party.ts";
 const clock = () => performance.timeOrigin + performance.now();
 export async function createGameServer({ dev = false, nowMs = clock } = {}) {
   const app = express(),
@@ -35,23 +37,49 @@ export async function createGameServer({ dev = false, nowMs = clock } = {}) {
   const rooms = new Map(),
     sessions = new Map();
   app.get("/health", (_, res) =>
-    res.json({ ok: true, game: "mini-game-party", version: 2 }),
+    res.json({ ok: true, game: "mini-game-party", version: 3 }),
   );
   let vite;
   if (dev) {
     const { createServer } = await import("vite");
     vite = await createServer({
-      server: { middlewareMode: true, hmr: { server: http } },
+      server: {
+        fs: {
+          deny: [
+            "**/server/**",
+            "**/tests/**",
+            ".env",
+            ".env.*",
+            "*.{crt,pem}",
+            "**/.git/**",
+          ],
+        },
+        middlewareMode: true,
+        hmr: { server: http },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else app.use(express.static(resolve("dist")));
-  const send = (r) => io.to(r.code).emit("state", r);
+  // Secret round objects live outside the serializable room in a server-only WeakMap.
+  const send = (r) => {
+    io.to(r.code).emit("state", r);
+    if (r.game !== "liar-game" || r.phase !== "playing") return;
+    const game = currentLiar(r);
+    for (const p of r.players) {
+      const socketId = sessions.get(p.id)?.socket;
+      if (socketId) {
+        const own = game?.personal(p.id);
+        if (own) io.to(socketId).emit("liar:private", own);
+      }
+    }
+  };
   function host(r) {
     if (!r.players.some((p) => p.id === r.host && p.connected && !p.bot))
       r.host = r.players.find((p) => p.connected && !p.bot)?.id ?? "";
   }
   function lobby(r) {
+    clearLiar(r);
     r.phase = "lobby";
     r.round = 0;
     r.results = [];
@@ -81,6 +109,9 @@ export async function createGameServer({ dev = false, nowMs = clock } = {}) {
         if (p.alive) {
           p.alive = false;
           p.dead = nowMs();
+        }
+        if (r.game === "liar-game" && r.phase === "playing") {
+          tick(r, nowMs(), 0);
         }
         if (
           r.phase !== "final" &&
@@ -172,9 +203,19 @@ export async function createGameServer({ dev = false, nowMs = clock } = {}) {
       }
       attach(r, p, s);
     });
+    let joinSince = 0,
+      joinCount = 0,
+      liarSince = 0,
+      liarCount = 0;
     socket.on("enter", (data, ack) => {
       reply = typeof ack === "function" ? ack : undefined;
       if (session || !data || typeof data !== "object") return;
+      const now = nowMs();
+      if (now - joinSince >= 10000) {
+        joinSince = now;
+        joinCount = 0;
+      }
+      if (++joinCount > 15) return reject("잠시 후 다시 입장해 주세요.");
       const name =
         typeof data.name === "string" ? data.name.trim().slice(0, 12) : "";
       if (!name) return reject("닉네임을 입력해 주세요.");
@@ -227,13 +268,45 @@ export async function createGameServer({ dev = false, nowMs = clock } = {}) {
         );
         p.ready = true;
         r.settings.mode = "single";
-        r.settings.singleGame =
-          data.practiceGame === "push-out" ? "push-out" : "falling-floor";
+        r.settings.singleGame = gameIds.includes(data.practiceGame)
+          ? data.practiceGame
+          : "falling-floor";
         startMatch(r, nowMs());
       }
       attach(r, p, { id: p.id, code: r.code, token: randomUUID() });
       reply?.({ ok: true, code: r.code });
     });
+    for (const type of ["clue", "vote", "guess"]) {
+      socket.on("liar:" + type + ":submit", (data, respond) => {
+        if (typeof respond !== "function") return;
+        const r = rooms.get(session?.code),
+          p = r?.players.find((q) => q.id === session?.id),
+          now = nowMs();
+        if (
+          !p ||
+          !session ||
+          session.socket !== socket.id ||
+          r.game !== "liar-game"
+        )
+          return respond({ ok: false, code: "STALE_ROUND" });
+        if (now - liarSince >= 1000) {
+          liarSince = now;
+          liarCount = 0;
+        }
+        if (++liarCount > 8)
+          return respond({ ok: false, code: "RATE_LIMITED" });
+        const game = currentLiar(r);
+        if (!game) return respond({ ok: false, code: "STALE_ROUND" });
+        const rev = game.view.revision,
+          ack = game.submit(p, type, data, now);
+        if (rev !== game.view.revision) {
+          r.now = now;
+          if (game.outcome) tick(r, now, 0);
+          send(r);
+        }
+        respond(ack);
+      });
+    }
     socket.on("command", (data, ack) => {
       reply = typeof ack === "function" ? ack : undefined;
       if (!session || !data) return;
@@ -252,7 +325,8 @@ export async function createGameServer({ dev = false, nowMs = clock } = {}) {
       }
       const now = nowMs();
       if (["move", "jump", "dash", "push", "guard"].includes(type)) {
-        if (!acceptInput(r, p, data, type, now)) return;
+        if (r.game === "liar-game" || !acceptInput(r, p, data, type, now))
+          return;
         if (type === "move") move(r, p, data.x, data.y, now);
         else action(r, p, type, now);
         return;
@@ -314,9 +388,15 @@ export async function createGameServer({ dev = false, nowMs = clock } = {}) {
       if (!s.socket && s.expiry <= now) leave(s);
     for (const r of rooms.values()) {
       if (r.phase === "lobby" || r.phase === "final") continue;
-      const prev = r.phase;
+      const prev = r.phase,
+        revision = r.liar?.revision;
       tick(r, now, 1 / 30);
-      if (frame % 2 === 0 || r.phase !== prev) send(r);
+      if (
+        r.phase !== prev ||
+        revision !== r.liar?.revision ||
+        frame % (r.game === "liar-game" && r.phase === "playing" ? 90 : 2) === 0
+      )
+        send(r);
     }
   }, 1000 / 30);
   return {

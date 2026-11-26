@@ -42,7 +42,9 @@ test("six independent sessions finish three rounds and return to the lobby", asy
     }
     await host.getByRole("button", { name: /PUSH OUT.*밀어내기/ }).click();
     await expect(guests[0].getByText("선택한 모드 · 밀어내기")).toBeVisible();
-    await host.getByRole("button", { name: "두 게임 번갈아 진행" }).click();
+    await host.getByLabel("라이어 게임 포함").click();
+    await expect(host.getByLabel("라이어 게임 포함")).not.toBeChecked();
+    await host.getByRole("button", { name: "번갈아 진행" }).click();
     for (const p of pages)
       await p.getByRole("button", { name: "준비 완료" }).click();
     await host.getByRole("button", { name: "게임 시작" }).click();

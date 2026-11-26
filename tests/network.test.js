@@ -63,7 +63,13 @@ test("six clients select games, reset readiness, resume, reject stale input, fin
       false,
     );
     await call(host, "ready", { value: true });
-    await call(host, "settings", { value: { rounds: 3, mode: "alternate" } });
+    await call(host, "settings", {
+      value: {
+        rounds: 3,
+        mode: "alternate",
+        enabledGames: ["falling-floor", "push-out"],
+      },
+    });
     assert.ok(r.players.every((p) => !p.ready));
     for (const s of clients.slice(0, 6))
       await call(s, "ready", { value: true });

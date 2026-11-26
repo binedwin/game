@@ -1247,3 +1247,253 @@ dialog p {
     font-size: 25px;
   }
 }
+
+.card-art.liar-game {
+  background: #d5eae0;
+}
+.mystery-card {
+  position: absolute;
+  left: 30px;
+  top: 7px;
+  width: 37px;
+  height: 54px;
+  text-align: center;
+  background: #fff5bd;
+  color: #4b5261;
+  border: 2px solid #403747;
+  border-radius: 4px;
+  transform: rotate(-9deg);
+  font: bold 33px/50px monospace;
+  box-shadow: 4px 3px #80b6a8;
+}
+.liar-game.card-art canvas:nth-of-type(1) {
+  left: 5px;
+  bottom: 6px;
+  width: 32px !important;
+}
+.liar-game.card-art canvas:nth-of-type(2) {
+  right: 3px;
+  bottom: 4px;
+  width: 32px !important;
+}
+.mix-set {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  border: 0;
+  padding: 0;
+  margin: 15px 0;
+}
+.mix-set legend {
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+.mix-set label {
+  font-size: 14px;
+}
+.mix-set input {
+  accent-color: #755390;
+}
+.case-header {
+  height: auto;
+  background: #373346;
+  color: #fff6db;
+  border: 0;
+  padding: 17px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.case-header small,
+.role-card > small {
+  font: 700 12px monospace;
+  letter-spacing: 1px;
+}
+.case-header h2 {
+  margin-top: 5px;
+}
+.case-clock {
+  border: 1px solid #92879c;
+  border-radius: 6px;
+  padding: 8px 13px;
+  font-size: 20px;
+  color: #ffdd83;
+}
+.case-clock.urgent {
+  background: #7c3442;
+  color: white;
+}
+.case-layout {
+  display: grid;
+  grid-template-columns: minmax(215px, 1fr) minmax(0, 2fr);
+  gap: 22px;
+  padding: 22px;
+}
+.case-layout h3 {
+  font-size: 18px;
+  margin: 0 0 10px;
+}
+.role-card {
+  padding: 16px;
+  background: #f8ebc9;
+  border: 1px solid #bba97b;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.role-card h3 {
+  font-size: 26px;
+  margin: 8px 0;
+}
+.role-card p,
+.case-main > p,
+.liar-reveal p {
+  line-height: 1.5;
+  font-size: 15px;
+}
+.role-card button {
+  margin-top: 7px;
+}
+.case-order {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.case-order li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px dashed #d8cedc;
+  padding: 5px;
+}
+.case-order .speaking {
+  background: #e8f4ee;
+}
+.case-order li small {
+  margin-left: auto;
+}
+.case-main h3 small,
+.ballot small {
+  font-size: 13px;
+  color: #716679;
+}
+.clue-list {
+  max-height: 40vh;
+  overflow: auto;
+  margin: 10px 0 18px;
+  border-block: 1px solid #ded7e0;
+}
+.clue {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 2px;
+}
+.clue p {
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+}
+.case-empty {
+  padding: 20px 0;
+  color: #706777;
+}
+.liar-entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px;
+}
+.liar-entry label,
+.liar-entry input {
+  grid-column: 1/-1;
+}
+.liar-entry input {
+  min-width: 0;
+  padding: 12px;
+  font-size: 16px;
+  border: 1px solid #a99baa;
+  border-radius: 6px;
+}
+.liar-entry small {
+  align-self: center;
+}
+.ballot-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+.ballot-choices button {
+  border: 1px solid #a499ac;
+  background: white;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.ballot-choices button[aria-pressed="true"] {
+  background: #ffe692;
+  border-color: #503b33;
+}
+.liar-reveal {
+  background: #f5eedb;
+  border-radius: 8px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.liar-reveal h3 {
+  margin: 0 0 5px;
+}
+.liar-reveal details {
+  margin-top: 7px;
+}
+.liar-reveal summary {
+  cursor: pointer;
+}
+@media (min-width: 900px) {
+  .party-games {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .game-card {
+    gap: 10px;
+  }
+  .game-card .card-art {
+    width: 74px;
+  }
+}
+@media (max-width: 670px) {
+  .case-layout {
+    grid-template-columns: 1fr;
+    padding: 13px;
+    gap: 12px;
+  }
+  .case-aside .role-card {
+    margin: 0 0 10px;
+  }
+  .case-order {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .case-order li {
+    font-size: 12px;
+    gap: 3px;
+  }
+  .case-order li canvas {
+    display: none;
+  }
+  .case-order li small {
+    font-size: 10px;
+  }
+  .clue-list {
+    max-height: 23dvh;
+  }
+  .case-header {
+    padding: 11px 14px;
+  }
+  .case-aside h3 {
+    margin-bottom: 5px;
+  }
+  .role-card {
+    padding: 10px;
+  }
+  .case-main > p {
+    margin: 7px 0;
+  }
+}

@@ -123,13 +123,14 @@ test("six spawns are unique, random bags balanced, fixed / alternate selections 
   assert.equal(new Set(r.players.map((p) => cell(r, p))).size, 6);
   for (let i = 0; i < 100; i++) {
     const seq = schedule({ ...r.settings, mode: "random", rounds: 10 });
-    assert.equal(seq.filter((id) => id === "push-out").length, 5);
+    for (const id of ["falling-floor", "push-out", "liar-game"])
+      assert.ok([3, 4].includes(seq.filter((v) => v === id).length));
     assert.ok(seq.every((v, k) => k === 0 || seq[k - 1] !== v));
   }
   assert.deepEqual(schedule({ ...r.settings, mode: "alternate", rounds: 3 }), [
     "falling-floor",
     "push-out",
-    "falling-floor",
+    "liar-game",
   ]);
   assert.deepEqual(
     schedule({ ...r.settings, singleGame: "push-out", rounds: 3 }),
